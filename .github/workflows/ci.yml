@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  # Manual trigger. Use this to smoke-test the self-hosted runner after setup,
+  # BEFORE making `verify` a required status check — see docs/local-ci.md.
+  workflow_dispatch:
+
+# Pushing twice in quick succession used to pay for both runs. Only the newest
+# commit on a ref is worth verifying, and there is exactly one self-hosted
+# runner, so a superseded run would otherwise block the one that matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # Self-hosted runner in WSL2 Ubuntu. Runner time is not billed, which is the
+    # whole point: the full six-project Playwright matrix runs on every push
+    # without touching the Actions minute allowance.
+    #
+    # REQUIRES a registered runner — scripts/setup-self-hosted-runner.sh. With
+    # no runner online this job queues (up to 24h) rather than failing, so do
+    # not make it a required status check until the runner shows "Idle" at
+    # /settings/actions/runners.
+    #
+    # Falling back to `ubuntu-latest` is a one-line change if the runner is ever
+    # unavailable — but drop PW_WORKERS back to 2, since hosted runners are 2-core.
+    runs-on: [self-hosted, linux, x64]
+    # Everything runs inside Playwright's own image, pinned to the exact version
+    # in package.json. This is not gold-plating — it is the only way this works.
+    # The runner host is WSL2 Ubuntu 26.04, and Playwright 1.59.1 publishes no
+    # browser builds for 26.04 at all: `npx playwright install` on the host fails
+    # outright with "does not support chromium on ubuntu26.04-x64". Forcing the
+    # 24.04 builds via PLAYWRIGHT_HOST_PLATFORM_OVERRIDE gets further but then
+    # needs 79 apt packages, 5 of which (libicu74, libavcodec60, libvpx9,
+    # libx264-164, libxml2) do not exist on 26.04 — and those five are mostly
+    # WebKit's, so Safari coverage would be lost.
+    #
+    # The image sidesteps the host distro entirely and keeps browsers, system
+    # libs and the Playwright version locked together. Bump this tag and the
+    # package.json pin as one change, never separately.
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      # Firefox refuses to start when $HOME is not owned by the user running it,
+      # and GitHub mounts /github/home as $HOME owned by the HOST runner's uid —
+      # which does not match the container user. Chromium and WebKit tolerate
+      # that; Firefox fails at launch with
+      #
+      #   browserType.launch: Failed to launch the browser process.
+      #   Firefox is unable to launch if the $HOME folder isn't owned by the
+      #   current user.
+      #
+      # Every Desktop Firefox test then "fails" in 1-6ms, which reads like a
+      # mass assertion failure and is nothing of the kind. Pointing HOME at a
+      # container-owned path fixes it without touching ownership on the host.
+      #
+      # This only surfaced on 2026-08-27, the first run after the self-hosted
+      # runner came online — the job had been queueing against nothing before.
+      options: --user root
+    # HOME must be set at the JOB level, not under `container:` — the runner
+    # exports HOME=/github/home for every step and a container-scoped value is
+    # overridden before Playwright ever sees it. Firefox then reports exactly
+    # that: "$HOME is /github/home which is owned by ubuntu." This placement is
+    # the workaround Playwright's own error message prescribes.
+    env:
+      HOME: /root
+    # A cancelled run on 2026-08-18 sat for 4h23m before anyone noticed. The
+    # default cap is six hours; a healthy run here is well under 30 minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # No `npx playwright install` step: the image already carries the browsers
+      # for this exact version at /ms-playwright, and PLAYWRIGHT_BROWSERS_PATH
+      # points there. If the image tag and the package.json pin ever drift,
+      # Playwright fails with a clear "Executable doesn't exist" rather than
+      # silently testing the wrong build.
+
+      # THE GATE. Deliberately the same entry point as .husky/pre-push, so a
+      # local pass predicts a CI pass exactly. If these two ever drift, people
+      # start pushing "to see if CI passes" — which is the minute-burning habit
+      # this whole setup exists to end. Stages, in order: typecheck, lint,
+      # production build, Playwright (all six projects, including the
+      # responsiveness sweeps in tests/e2e/mobile-layout.spec.ts).
+      #
+      # The build stage hands its output to the Playwright webServer via
+      # PW_REUSE_BUILD, so this is one `next build`, not two.
+      #
+      # Deliberately NO GA4 id here. Loading the real gtag.js across six browser
+      # projects would add a third-party network dependency to every test and
+      # multiply CI hits on the property. The consent tests assert against
+      # window.dataLayer, which the pre-paint bootstrap populates whether or not
+      # gtag.js ever loads.
+      - name: verify (typecheck, lint, build, e2e + responsiveness)
+        run: npm run verify
+        env:
+          # The runner box has 20 cores but WSL2 caps it near 7.7 GB of RAM, and
+          # six concurrent browser engines are memory-bound long before they are
+          # CPU-bound. Six workers is ~3x the old hosted setting with headroom.
+          PW_WORKERS: 6
+          # All six Playwright projects. Escape hatch: if WebKit turns out to be
+          # unbuildable on the runner's Ubuntu 26.04 (Playwright 1.59.1 publishes
+          # no package list for it), set this to `quick` to drop Firefox and
+          # WebKit while keeping every assertion, and re-enable `full` once
+          # `npx playwright install --with-deps webkit` succeeds there.
+          VERIFY_LEVEL: full
+
+      # Lighthouse launches its own Chrome, and chrome-launcher only searches
+      # standard system locations. `ubuntu-latest` ships Chrome preinstalled,
+      # which is the only reason the lhci step below ever worked; a bare WSL
+      # Ubuntu has no Chrome at all and lhci dies with "No Chrome installations
+      # found". Point it at the Chromium `npx playwright install` already put in
+      # ~/.cache/ms-playwright, so there is nothing extra to provision.
+      #
+      # Caveat: that is Playwright's Chromium build, not Google Chrome stable,
+      # so absolute Lighthouse numbers can shift a little. The budgets in
+      # lighthouserc.cjs were calibrated on hosted runners; if they prove
+      # miscalibrated for this hardware, recalibrate them there rather than
+      # loosening this step into meaninglessness.
+      - name: point Lighthouse at Playwright's Chromium
+        run: |
+          echo "CHROME_PATH=$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+
+      # Separate from the gate because it needs its own build with the real
+      # measurement ID: `npm run lhci` runs `next build` itself, so the id has to
+      # be present here or the audited build ships an empty value and no tag —
+      # and Lighthouse would then measure a page without gtag.js, making the TBT
+      # ceilings in lighthouserc.cjs a fiction. Every CI hit is tagged internal
+      # so it can be excluded in GA4. REQUIRES a matching "Internal Traffic" data
+      # filter to be Active in GA4 Admin → Data filters. See .env.example.
+      # A FRESH build, deliberately. The gate above already wrote .next with NO
+      # GA4 id; this build needs one WITH it, and NEXT_PUBLIC_* is string-inlined
+      # at build time. Rebuilding over that .next is exactly the hazard
+      # .env.example documents for Netlify — "a plain Deploy site can reuse the
+      # cached .next and ship the old empty value" — which would leave Lighthouse
+      # auditing a page with no tag while the TBT ceilings pretend otherwise.
+      #
+      # On 2026-08-27 it did worse than that: all four verify stages passed (345
+      # tests) and then the rebuild died outright.
+      #
+      #   TurbopackInternalError: Failed to write app endpoint /page
+      #   evaluate_webpack_loader failed / failed to receive message
+      #   reading packet length / unexpected end of file
+      #
+      # "failed to receive message" is Turbopack's PostCSS worker dying, not a
+      # compile error, and it only ever happens on the SECOND build — the first
+      # compiles the same CSS in 2.8s. Bumping NODE_OPTIONS did nothing, which
+      # figures: Turbopack's workers are Rust, not V8. An incremental rebuild
+      # over a cache written with different inlined constants is the likelier
+      # culprit, and clearing it costs seconds.
+      - name: Lighthouse (fresh build with the real measurement id)
+        run: |
+          rm -rf .next
+          npm run lhci
+        env:
+          NEXT_PUBLIC_GA4_ID: G-PTJ4Z4E9KJ
+          NEXT_PUBLIC_ANALYTICS_TRAFFIC_TYPE: internal
+
+      # No upload-artifact step on purpose: artifact storage is billed against
+      # the same quota that is already exhausted, and a Playwright report with
+      # traces runs to hundreds of MB. On a self-hosted runner the report is
+      # already on disk — open it from WSL with:
+      #   npx playwright show-report ~/actions-runner/_work/elevateHRG/elevateHRG/playwright-report

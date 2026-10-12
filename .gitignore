@@ -1,0 +1,47 @@
+node_modules
+.next
+# Next-generated; flips between dev/build paths — don't track
+next-env.d.ts
+out
+dist
+coverage
+playwright-report
+test-results
+.env
+.env.*
+!.env.example
+.vercel
+.DS_Store
+*~
+*.log
+tsconfig.tsbuildinfo
+.lighthouseci/
+.superpowers/
+.claude/
+.antigravitycli/
+CLAUDE_CODE_HANDOFF.md
+REDESIGN_VS_LIVE_AUDIT.md
+docs/live-snapshot/
+docs/IG_PHOTO_DOWNLOAD_PLAYBOOK.md
+docs/PHOTO_SLOT_INVENTORY.md
+scripts/audit-live-site.cjs
+scripts/one-page.cjs
+scripts/probe.cjs
+# QA/session artifacts
+.playwright-mcp/
+/*-1280.png
+/*-390.png
+
+# design-critic run artifacts (tool lives globally in ~/.claude/design-critic)
+qa/
+docs/critic-output/
+docs/image-audit/
+.serena/
+
+# agent harness scratch (session memory + scope, not project code)
+.agent-harness/
+
+# Local-only material that must never be published: raw job photos (some
+# carry burned-in GPS stamps), held-back photos, and scratch scripts/screenshots.
+/assets/
+/.tmp-*

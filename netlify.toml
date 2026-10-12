@@ -1,0 +1,29 @@
+# Netlify build configuration.
+#
+# This file exists for ONE reason: to pin the Node version. Everything else
+# (build command, publish directory, the Next.js runtime) is configured in the
+# Netlify UI and is deliberately NOT restated here — duplicating working UI
+# settings into version control is how the two drift apart.
+#
+# Why the pin matters: next@16 requires Node >=20.9.0 (see `next`'s own
+# engines field), and this repository previously specified no Node version
+# anywhere — no engines, no .nvmrc, no netlify.toml. That left production
+# building on whatever default Netlify happened to select, while CI built on
+# Node 22 (.github/workflows/ci.yml). A default below 20.9 fails the build,
+# and a failed build is invisible from the outside: Netlify simply keeps
+# serving the last deploy that succeeded, so the site looks fine while every
+# new commit silently fails to ship.
+#
+# Keep this in lockstep with .nvmrc and the node-version in ci.yml.
+[build.environment]
+  NODE_VERSION = "22"
+
+  # Netlify's secret scanner fails the build when the VALUE of a configured env
+  # var appears in the repository. `LEADS_TO_EMAIL`, `LEADS_FROM_EMAIL` and
+  # `CAREERS_TO_EMAIL` are routing addresses, not credentials, and the
+  # project's runbooks name them on purpose, so they are left out of the scan.
+  #
+  # Scoped to these keys on purpose. Do NOT reach for SECRETS_SCAN_OMIT_PATHS
+  # here — that would blind the scanner to every future secret in those files,
+  # including real ones. BREVO_API_KEY and friends stay scanned.
+  SECRETS_SCAN_OMIT_KEYS = "LEADS_TO_EMAIL,LEADS_FROM_EMAIL,CAREERS_TO_EMAIL"

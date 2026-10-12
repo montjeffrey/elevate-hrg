@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+#
+# Pre-push verification gate.
+#
+# This exists because GitHub-hosted Actions minutes are exhausted, which removed
+# the only thing checking a push. lint-staged on pre-commit only formats and
+# lints the files in that one commit — it never typechecks the project, never
+# builds it, and never opens a browser.
+#
+# The gate is `scripts/verify.mjs`: typecheck, lint, production build, then the
+# Playwright suite (which includes the responsiveness sweeps in
+# tests/e2e/mobile-layout.spec.ts) against that same build.
+#
+# Level is chosen by destination, so the cost matches the risk:
+#   -> main            full matrix, all six Playwright projects
+#   -> any other ref   quick, Chromium desktop + Chromium mobile + Content
+# Force the full matrix anywhere with `VERIFY_LEVEL=full git push`.
+#
+# Bypass deliberately with `git push --no-verify` when you genuinely need to
+# (pushing a WIP branch, say). Do not make that a habit on main — and note that
+# main is protected server-side too, see docs/local-ci.md.
+
+set -e
+
+level="${VERIFY_LEVEL:-quick}"
+has_ref=""
+
+# stdin is one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  # A branch deletion (`git push origin :branch`) has nothing to verify — the
+  # local sha is all-zeros. Skip rather than build pointlessly.
+  case "$local_sha" in
+    *[!0]*) has_ref="yes" ;;
+    *) continue ;;
+  esac
+
+  case "$remote_ref" in
+    refs/heads/main) level="full" ;;
+  esac
+done
+
+if [ -z "$has_ref" ]; then
+  echo "pre-push: branch deletion only, nothing to verify"
+  exit 0
+fi
+
+# VERIFY_LEVEL always wins, even over the main-branch upgrade above.
+node scripts/verify.mjs --level="${VERIFY_LEVEL:-$level}"

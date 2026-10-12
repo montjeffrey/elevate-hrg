@@ -1,0 +1,721 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Short-landscape viewport tiers (laptops, esp. with Windows display scaling).
+   The home hero keeps its logo + headline at full prominence on these screens;
+   these variants only trim secondary content (paragraph, badges) and tighten
+   vertical rhythm so the grand composition mostly fits a short window without
+   shrinking the elements that carry the first impression. Gated with
+   `pointer: fine` so only precise-pointer laptops/desktops match — large phones
+   in landscape (coarse pointer) flow/scroll naturally and are never clamped. */
+@custom-variant short (@media (min-width: 768px) and (max-height: 820px) and (pointer: fine));
+@custom-variant shorter (@media (min-width: 768px) and (max-height: 660px) and (pointer: fine));
+
+@theme {
+  --color-brand-gold: #cfa37b;
+  /* Deep gold for CTA button backgrounds (white text) and accent text on light
+     surfaces. Deepened from #b9823f → #996324 so white text clears WCAG 1.4.3
+     AA (4.5:1): white-on-gold-deep is now 5.04:1 (was 3.32:1) and gold-deep
+     text on cream is 4.64:1 (was 2.92:1). Stays distinctly golden — the lighter
+     --color-brand-gold remains for vibrant accents on dark surfaces. */
+  --color-brand-gold-deep: #996324;
+  /* Accessible bronze for small eyebrow/label text on light backgrounds.
+     Deepened #956222 → #875825 so it clears WCAG AA (4.5:1) on the real
+     sandstone-tinted section backgrounds (e.g. #f7e6d0), not just pure cream:
+     now ~4.98:1 on #f7e6d0, ~5.6:1 on cream, ~6.1:1 on white. Bronze is only
+     ever placed on light surfaces (it already fails on dark), so deepening it
+     only improves contrast everywhere it is used. */
+  --color-brand-bronze: #875825;
+  --color-brand-sandstone: #e3c6a3;
+  --color-brand-cream: #fff4e4;
+  --color-brand-charcoal: #151515;
+  --color-brand-charcoal-light: #2a2a2a;
+  --color-brand-espresso: #3a2417;
+  /* Deepened #74685f → #6b6058 so body/secondary text clears WCAG AA (4.5:1) on
+     sandstone-tinted section backgrounds (~5.0:1 on #f7e6d0). Used only on light
+     surfaces, so deepening only improves contrast. */
+  --color-brand-warm-gray: #6b6058;
+
+  --font-display: var(--font-display-loaded), "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: var(--font-sans-loaded), "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --ease-elevate: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snap: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --radius-card: 1rem;
+  --radius-pill: 9999px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --background: var(--color-brand-cream);
+  --foreground: var(--color-brand-espresso);
+  --card: #ffffff;
+  --card-foreground: var(--color-brand-espresso);
+  --popover: #ffffff;
+  --popover-foreground: var(--color-brand-espresso);
+  --primary: var(--color-brand-gold-deep);
+  --primary-foreground: #ffffff;
+  --secondary: var(--color-brand-sandstone);
+  --secondary-foreground: var(--color-brand-espresso);
+  --muted: var(--color-brand-sandstone);
+  --muted-foreground: var(--color-brand-warm-gray);
+  --accent: var(--color-brand-gold);
+  --accent-foreground: var(--color-brand-charcoal);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: #ffffff;
+  --border: color-mix(in srgb, var(--color-brand-sandstone) 72%, white);
+  --input: color-mix(in srgb, var(--color-brand-sandstone) 72%, white);
+  --ring: var(--color-brand-gold-deep);
+  --radius: 0.5rem;
+  /* Measured height of the cookie notice, published by ConsentNotice via a
+     ResizeObserver while the bar is up. 0px whenever it is not. Consumed only
+     by transforms — never by `bottom`/`height` — see the consent block below. */
+  --consent-notice-h: 0px;
+}
+
+.dark {
+  --background: var(--color-brand-charcoal);
+  --foreground: var(--color-brand-cream);
+  --card: #1a1a1a;
+  --card-foreground: var(--color-brand-cream);
+  --popover: #1a1a1a;
+  --popover-foreground: var(--color-brand-cream);
+  --primary: var(--color-brand-gold);
+  --primary-foreground: var(--color-brand-charcoal);
+  --secondary: var(--color-brand-espresso);
+  --secondary-foreground: var(--color-brand-cream);
+  --muted: #232323;
+  --muted-foreground: #b8a99a;
+  --accent: var(--color-brand-gold-deep);
+  --accent-foreground: #ffffff;
+  --border: #2a2a2a;
+  --input: #2a2a2a;
+  --ring: var(--color-brand-gold-deep);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply bg-background text-foreground;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground;
+    min-width: 320px;
+  }
+
+  a,
+  button {
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring;
+  }
+}
+
+/* ── Welcome splash (CSS-only, JS-independent) ──────────────────────────────
+   A first-visit intro: the Elevate emblem "loads" with a breathing gold glow,
+   then two doors swing open in 3D — a gold seam flaring down the middle —
+   revealing the hero's opening frame already drifting in motion behind them,
+   and cross-fade into the live hero. Every phase runs via CSS keyframes that
+   begin at first paint, so the reveal never waits for React hydration. The hero
+   <h1> underneath is SSR'd and stays the LCP element, painting at first paint
+   regardless of the intro's length. Tunable via the custom properties below. */
+.welcome-splash {
+  --splash-load: 1.8s; /* breathing "loading" hold before the doors part */
+  --splash-open: 1.2s; /* door swing duration */
+  --splash-fade: 0.8s; /* cross-fade of the overlay into the hero */
+  --glow-pulse: 1.6s; /* breathing-glow cycle */
+  --door-rotate: 30deg; /* 3D door swing angle */
+  --door-z: -260px; /* how far the doors recede as they open */
+  --door-scale: 0.93;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  pointer-events: none;
+  perspective: 1400px;
+  perspective-origin: center center;
+  /* Cross-fade the whole overlay into the hero as the doors finish (so the hero
+     text/CTAs don't hard-cut in); visibility:hidden then drops it from
+     hit-testing. */
+  animation: splash-overlay-hide var(--splash-fade) ease-out
+    calc(var(--splash-load) + var(--splash-open) - var(--splash-fade) * 0.45) forwards;
+}
+
+/* The scene the doors reveal: the hero's opening frame, washed to match
+   HeroHome and slowly drifting so it reads as already in motion. Sits behind
+   the doors (revealed as they part) and cross-fades into the live hero <video>
+   when the overlay unmounts — the poster IS the video's first frame, so the
+   handoff is seamless. Reuses the poster the hero <video> already loads, so it
+   costs no extra bytes; never fetched for returning/reduced-motion visitors
+   (the splash is display:none, so the background image is skipped). */
+.welcome-splash-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-color: var(--color-brand-charcoal);
+  background-image:
+    radial-gradient(ellipse at top, rgba(207, 163, 123, 0.12), transparent 55%),
+    radial-gradient(ellipse at bottom right, rgba(185, 130, 63, 0.18), transparent 60%),
+    linear-gradient(
+      to bottom,
+      rgba(21, 21, 21, 0.55),
+      rgba(21, 21, 21, 0.4) 45%,
+      rgba(21, 21, 21, 0.85)
+    ),
+    url("/brand/hero-loop-poster.avif");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  transform: scale(1.07);
+  will-change: transform;
+  /* Drift gently while the doors are parting, then SETTLE to the hero's exact
+     rest state (scale 1, centered) by the time the overlay cross-fades — so the
+     scene the doors reveal lands pixel-aligned on the real hero underneath, with
+     no zoom-pop at the handoff. The hero <video> is object-cover at scale 1 with
+     the same washes, so once scale + position match, the cross-fade is seamless;
+     the slightly longer --splash-fade dissolves any residual video-frame
+     difference rather than snapping. */
+  animation: splash-scene-drift calc(var(--splash-load) + var(--splash-open)) linear forwards;
+}
+
+.welcome-splash-door {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  overflow: hidden;
+  background: var(--color-brand-charcoal);
+  backface-visibility: hidden;
+  will-change: transform;
+  z-index: 1;
+}
+
+.welcome-splash-door-left {
+  left: 0;
+  transform-origin: left center;
+  animation: splash-door-left var(--splash-open) cubic-bezier(0.76, 0, 0.24, 1) var(--splash-load)
+    forwards;
+}
+
+.welcome-splash-door-right {
+  right: 0;
+  transform-origin: right center;
+  animation: splash-door-right var(--splash-open) cubic-bezier(0.76, 0, 0.24, 1) var(--splash-load)
+    forwards;
+}
+
+/* Each door holds a full logo pinned to the seam (screen center) and clips it
+   with overflow:hidden, so together the halves read as one centered logo that
+   splits apart as the doors open. */
+.welcome-splash-logo {
+  position: absolute;
+  top: 50%;
+  display: block;
+  width: 10rem;
+  transform: translate(-50%, -50%);
+}
+
+@media (min-width: 640px) {
+  .welcome-splash-logo {
+    width: 12rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .welcome-splash-logo {
+    width: 14rem;
+  }
+}
+
+.welcome-splash-door-left .welcome-splash-logo {
+  left: 100%;
+}
+
+.welcome-splash-door-right .welcome-splash-logo {
+  left: 0;
+}
+
+.welcome-splash-logo img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+/* Breathing gold glow behind the emblem — the "loading" pulse. Sized larger
+   than the logo and clipped at the seam by each door's overflow:hidden, so the
+   two halves read as one centered glow that breathes, then rides the door out
+   as it swings open. */
+.welcome-splash-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    rgba(207, 163, 123, 0.7) 0%,
+    rgba(185, 130, 63, 0.3) 42%,
+    rgba(21, 21, 21, 0) 75%
+  );
+  will-change: transform, opacity;
+  animation: splash-glow-pulse var(--glow-pulse) ease-in-out infinite;
+}
+
+/* Seam light that flares as the doors part. */
+.welcome-splash-seam {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 120vh;
+  width: 1px;
+  transform: translate(-50%, -50%) scaleY(0.55);
+  opacity: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(207, 163, 123, 0) 0%,
+    rgba(207, 163, 123, 0.9) 30%,
+    rgba(255, 220, 170, 1) 50%,
+    rgba(207, 163, 123, 0.9) 70%,
+    rgba(207, 163, 123, 0) 100%
+  );
+  box-shadow:
+    0 0 28px 8px rgba(207, 163, 123, 0.55),
+    0 0 64px 16px rgba(185, 130, 63, 0.35);
+  z-index: 2;
+  animation: splash-seam 0.55s ease-out var(--splash-load) forwards;
+}
+
+@keyframes splash-door-left {
+  to {
+    transform: translate3d(-104%, 0, var(--door-z)) rotateY(calc(-1 * var(--door-rotate)))
+      scale(var(--door-scale));
+  }
+}
+
+@keyframes splash-door-right {
+  to {
+    transform: translate3d(104%, 0, var(--door-z)) rotateY(var(--door-rotate))
+      scale(var(--door-scale));
+  }
+}
+
+@keyframes splash-glow-pulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(0.86);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.2);
+    opacity: 1;
+  }
+}
+
+/* Gentle settle on the revealed scene: drifts from a slight zoom/offset to the
+   hero's exact rest state (scale 1, centered), reaching it as the cross-fade
+   begins so the handoff into the real hero is seamless. */
+@keyframes splash-scene-drift {
+  from {
+    transform: scale(1.07) translate3d(0, 1.2%, 0);
+  }
+  to {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes splash-seam {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scaleY(0.55) scaleX(1);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleY(1) scaleX(3);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scaleY(1.25) scaleX(1);
+  }
+}
+
+@keyframes splash-overlay-hide {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* Phones keep the full-length choreography (owner decision — the intro is the
+   brand moment and must be seen, not sped through); only the 3D depth is eased
+   for small screens. */
+@media (max-width: 1023px) {
+  .welcome-splash {
+    --door-rotate: 22deg;
+    --door-z: -160px;
+    perspective: 900px;
+  }
+}
+
+/* Pre-paint hold: the layout inline script adds `.splash-wait` to <html>
+   before first paint and removes it on the second animation frame — i.e. once
+   a frame has actually been presented — so the intro's clock starts when the
+   splash is truly visible instead of when styles resolve. Guarantees the full
+   choreography is seen even on slow devices/networks. JS-applied only, so
+   no-JS visitors get the plain CSS timeline (which always completes and
+   reveals the page). */
+.splash-wait .welcome-splash,
+.splash-wait .welcome-splash * {
+  animation-play-state: paused !important;
+}
+
+/* Suppressed visits (`?intro=skip`, e2e suppression key — both applied by the
+   layout inline script) and reduced-motion users never see the intro. */
+.splash-hidden .welcome-splash {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-splash {
+    display: none !important;
+  }
+}
+
+/* Force-hide Radix overlay/content primitives once they enter the
+   closed state. Tailwind's `data-[state=closed]:hidden` variant works in
+   production but Radix keeps the node mounted during the close animation
+   (and tw-animate-css uses `animation-fill-mode: none`, so the element
+   visually snaps back to its open transform after animation). Playwright
+   then reports the still-mounted node as visible until Radix unmounts,
+   causing flaky e2e failures. Setting `display: none` directly on the
+   closed-state attribute removes it from the accessibility tree and the
+   layout immediately, which is what users with assistive tech expect. */
+[data-slot="navigation-menu-content"][data-state="closed"],
+[data-slot="sheet-content"][data-state="closed"],
+[data-slot="sheet-overlay"][data-state="closed"] {
+  display: none !important;
+}
+
+/* Suppress Mobile Safari's autoplay-blocked / loading "tap to play" overlay
+   on the decorative background videos. Without this, when iOS hasn't buffered
+   enough of the file yet (or denies autoplay under Low Power Mode), it paints
+   a centered play button on top of the video — which then shows through the
+   welcome-splash reveal and the hero. These are muted, looped, aria-hidden
+   decorative videos; user-controllable playback is never intended. */
+video[aria-hidden="true"]::-webkit-media-controls,
+video[aria-hidden="true"]::-webkit-media-controls-start-playback-button,
+video[aria-hidden="true"]::-webkit-media-controls-overlay-play-button,
+video[aria-hidden="true"]::-webkit-media-controls-panel {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes hero-shingle-flow {
+  from {
+    background-position:
+      -920px 0%,
+      0 0,
+      78px 39px;
+  }
+  to {
+    background-position:
+      920px 0%,
+      -156px -78px,
+      -78px -39px;
+  }
+}
+
+@layer utilities {
+  .hero-shingle-animation {
+    background-image:
+      linear-gradient(
+        105deg,
+        transparent 0%,
+        transparent 40%,
+        rgba(255, 244, 228, 0.08) 46%,
+        rgba(207, 163, 123, 0.22) 50%,
+        transparent 56%,
+        transparent 100%
+      ),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='156' height='78' viewBox='0 0 156 78'%3E%3Cpath d='M 0 0 A 78 24 0 0 1 156 0' fill='none' stroke='%23cfa37b' stroke-width='1.2' stroke-opacity='0.75'/%3E%3C/svg%3E"),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='156' height='78' viewBox='0 0 156 78'%3E%3Cpath d='M 0 0 A 78 24 0 0 1 156 0' fill='none' stroke='%23fff4e4' stroke-width='0.6' stroke-opacity='0.22'/%3E%3C/svg%3E");
+    background-position:
+      -920px 0%,
+      0 0,
+      78px 39px;
+    background-size:
+      1840px 100%,
+      156px 78px,
+      156px 78px;
+    opacity: 0.55;
+    will-change: background-position;
+  }
+
+  .hero-shingle-animation[data-motion-enabled="true"] {
+    animation: hero-shingle-flow 28s linear infinite;
+  }
+
+  [data-process-card][data-process-variant="desktop"] [data-process-content],
+  [data-process-card][data-process-variant="desktop"] [data-process-description] {
+    will-change: opacity;
+  }
+
+  [data-process-card][data-process-variant="desktop"][data-process-state="compact"]
+    [data-process-content],
+  [data-process-card][data-process-variant="desktop"][data-process-state="upcoming"]
+    [data-process-content],
+  [data-process-card][data-process-variant="desktop"][data-process-state="compact"]
+    [data-process-description],
+  [data-process-card][data-process-variant="desktop"][data-process-state="upcoming"]
+    [data-process-description] {
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  .review-belt-track {
+    animation: marquee-scroll 110s linear infinite;
+  }
+
+  .group:hover .review-belt-track,
+  .review-belt-track:hover,
+  .review-belt-track:focus-within {
+    animation-play-state: paused;
+  }
+}
+
+/* ── Motion-free reveal (mobile / minimal / SSR baseline) ───────────────────
+   Pure-CSS entrance that plays once on mount with NO JavaScript and NO
+   IntersectionObserver, so the reveal primitives (MaskReveal/SplitHeading) can
+   render a baseline that never imports motion/react on the mobile critical path.
+   The full (desktop) tier still layers its richer motion on top after hydration. */
+@keyframes reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes reveal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  /* Reveal primitive. The tier is chosen by the pre-paint html[data-motion]
+     attribute (set by the inline script in app/layout.tsx), so the correct
+     initial state is applied before first paint — no flash, no motion library,
+     no IntersectionObserver. If JS is disabled, html[data-motion] is never set
+     and content simply stays visible (the default below). */
+  html[data-motion="mobile"] [data-reveal] {
+    animation: reveal-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--reveal-delay, 0s);
+  }
+
+  html[data-motion="minimal"] [data-reveal] {
+    animation: reveal-fade 0.5s ease-out both;
+    animation-delay: var(--reveal-delay, 0s);
+  }
+
+  html[data-motion="full"] [data-reveal] {
+    overflow: hidden;
+    clip-path: inset(0 100% 0 0);
+    transition: clip-path 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--reveal-delay, 0s);
+  }
+
+  html[data-motion="full"] [data-reveal][data-revealed] {
+    clip-path: inset(0 0 0 0);
+  }
+
+  /* Heading reveal (SplitHeading): mobile/minimal entrance via CSS; on the full
+     tier GSAP SplitText handles the per-line stagger, so no CSS rule applies. */
+  html[data-motion="mobile"] [data-reveal-text] {
+    animation: reveal-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--reveal-delay, 0s);
+  }
+
+  html[data-motion="minimal"] [data-reveal-text] {
+    animation: reveal-fade 0.5s ease-out both;
+    animation-delay: var(--reveal-delay, 0s);
+  }
+}
+
+/* ── Floating CTA reveal (sticky Call/Schedule bar, message FAB) ────────────
+   Both triggers are conditionally mounted by their own scroll/visibility
+   logic (see StickyMobileCTA, JoinTheClubModal), so every mount is a fresh
+   DOM node — a plain CSS `animation` (not a `transition`) is enough to make
+   each arrival play automatically, no IntersectionObserver or JS animation
+   library required. Tiered off the same html[data-motion] attribute as the
+   reveal primitive above, so it stays governed by the one motion-tier system
+   the site already uses for viewport/pointer size and reduced-motion. */
+@keyframes cta-reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cta-reveal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  html[data-motion="mobile"] [data-cta-reveal],
+  html[data-motion="full"] [data-cta-reveal] {
+    animation: cta-reveal-rise 0.45s var(--ease-snap) both;
+  }
+
+  html[data-motion="minimal"] [data-cta-reveal] {
+    animation: cta-reveal-fade 0.3s ease-out both;
+  }
+}
+
+/* ── Cookie consent notice ─────────────────────────────────────────────────
+   The bar is `position: fixed`, so it is out of flow and contributes nothing to
+   layout. Its entrance is transform + opacity ONLY. Animating `bottom`/`height`
+   on a fixed element DOES produce layout-shift entries; animating `transform`
+   does not — and CLS ≤ 0.1 is a CI error on all nine Lighthouse URLs. Do not
+   convert any of this to positional animation.
+
+   These rules live outside `@layer utilities` on purpose: unlayered styles beat
+   layered ones, which is how the sticky-CTA offset below overrides the
+   `[data-cta-reveal]` entrance animation (whose `both` fill-mode would
+   otherwise re-assert its own final `transform` and cancel the offset). */
+@keyframes consent-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.consent-notice {
+  animation: consent-notice-enter 0.4s var(--ease-snap) both;
+}
+
+/* Two fixed elements already own the bottom edge on mobile: the sticky
+   Call/Schedule bar (z-40) and the Join-the-Club FAB (z-40). The notice sits at
+   z-60, above both and below the splash's z-200 (moot — the notice never shows
+   while the splash is up).
+
+   The sticky CTA slides clear by the notice's measured height, via transform so
+   it stays CLS-exempt and the phone CTA stays reachable. The FAB is hidden
+   outright: `display: none` on a fixed element also produces no shift, and two
+   competing floating prompts at once is bad UX regardless. */
+html[data-consent-notice="open"] [data-testid="sticky-mobile-cta"] {
+  animation: none !important;
+  transform: translateY(calc(-1 * var(--consent-notice-h, 0px))) !important;
+}
+
+html[data-consent-notice="open"] [data-club-trigger] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal-text] {
+    animation: none !important;
+    transition: none !important;
+    clip-path: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  [data-cta-reveal] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* The notice appears instantly instead of sliding up. Only the notice — the
+     sticky-CTA offset above is a layout correction, not motion, and must keep
+     applying (its selector is more specific than the [data-cta-reveal] reset
+     above, so the offset survives this block). */
+  .consent-notice {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .hero-shingle-animation {
+    animation: none !important;
+  }
+
+  .review-belt-track {
+    animation: none !important;
+  }
+
+  /* WCAG 2.3.3 — disable Radix accordion open/close animations.
+     The data-state visual change (open vs. closed) is preserved;
+     only the animated height transition is removed. */
+  [data-slot="accordion-content"][data-state="open"],
+  [data-slot="accordion-content"][data-state="closed"],
+  .animate-accordion-down,
+  .animate-accordion-up {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,8 @@
+# Deliberately narrow: no repo-wide `text=auto`, which would renormalize every
+# file and bury a real diff under a few hundred line-ending-only changes.
+#
+# These entries exist because `core.autocrlf=true` on Windows rewrites checked-out
+# files to CRLF, and `sh` fails on a CRLF shebang. The push gate is a shell hook:
+# a hook that cannot execute is a hook that protects nothing.
+*.sh text eol=lf
+.husky/** text eol=lf
