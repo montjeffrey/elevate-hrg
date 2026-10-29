@@ -8,7 +8,6 @@ const withBundleAnalyzer = bundleAnalyzer({
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   experimental: {
-    viewTransition: true,
     prefetchInlining: true,
   },
   images: {
