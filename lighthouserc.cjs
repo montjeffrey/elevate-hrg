@@ -8,6 +8,9 @@ module.exports = {
       startServerReadyPattern: "Ready",
       startServerReadyTimeout: 30000,
       settings: {
+        // CI runs Lighthouse as root inside the Playwright container, where Chrome
+        // will not start without --no-sandbox; /dev/shm there is also too small.
+        chromeFlags: "--no-sandbox --disable-dev-shm-usage",
         // Mobile preset: Lighthouse default (no desktop preset override)
         // Simulates Moto G4 on slow 4G throttling — matches Core Web Vitals field conditions
         formFactor: "mobile",
