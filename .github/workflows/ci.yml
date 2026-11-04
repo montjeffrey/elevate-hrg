@@ -12,6 +12,9 @@ on:
 # Pushing twice in quick succession used to pay for both runs. Only the newest
 # commit on a ref is worth verifying, and there is exactly one self-hosted
 # runner, so a superseded run would otherwise block the one that matters.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +32,11 @@ jobs:
     #
     # Falling back to `ubuntu-latest` is a one-line change if the runner is ever
     # unavailable — but drop PW_WORKERS back to 2, since hosted runners are 2-core.
-    runs-on: [self-hosted, linux, x64]
+    #
+    # This public repository runs on GitHub-hosted runners instead: they are free
+    # for public repos, and a self-hosted runner must never take jobs from a
+    # public repo, where a pull request from a fork could run code on it.
+    runs-on: ubuntu-latest
     # Everything runs inside Playwright's own image, pinned to the exact version
     # in package.json. This is not gold-plating — it is the only way this works.
     # The runner host is WSL2 Ubuntu 26.04, and Playwright 1.59.1 publishes no
@@ -72,8 +79,8 @@ jobs:
     # default cap is six hours; a healthy run here is well under 30 minutes.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -106,7 +113,8 @@ jobs:
           # The runner box has 20 cores but WSL2 caps it near 7.7 GB of RAM, and
           # six concurrent browser engines are memory-bound long before they are
           # CPU-bound. Six workers is ~3x the old hosted setting with headroom.
-          PW_WORKERS: 6
+          # Back to 2 on hosted runners, per the note on runs-on above.
+          PW_WORKERS: 2
           # All six Playwright projects. Escape hatch: if WebKit turns out to be
           # unbuildable on the runner's Ubuntu 26.04 (Playwright 1.59.1 publishes
           # no package list for it), set this to `quick` to drop Firefox and
