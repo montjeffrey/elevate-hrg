@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { deliverLead } from "@/lib/lead-delivery";
+import type { LeadSubmission } from "@/lib/lead-validation";
 import { createRateLimiter, getClientKey } from "@/lib/rate-limit";
 
 /**
@@ -93,5 +95,96 @@ test.describe("rate limiting (M1, L1)", () => {
     }
     expect(statuses.slice(0, 5).every((status) => status === 400)).toBe(true);
     expect(statuses[5]).toBe(429);
+  });
+});
+
+test.describe("lead delivery logging (L2)", () => {
+  const lead: LeadSubmission = {
+    honeypot: "",
+    name: "Pat Sensitive",
+    phone: "908-641-9827",
+    email: "pat.sensitive@example.com",
+    service: "Roofing",
+    zip: "07057",
+    message: "Gate code is 4471",
+  };
+  const leadId = "00000000-0000-4000-8000-000000000001";
+  const pii = [lead.name, lead.phone, lead.email as string, lead.message as string, "4471"];
+
+  async function captureErrors(run: () => Promise<unknown>) {
+    const original = console.error;
+    const lines: string[] = [];
+    console.error = (...args: unknown[]) =>
+      lines.push(
+        args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" ")
+      );
+    try {
+      await run();
+    } finally {
+      console.error = original;
+    }
+    return lines.join("\n");
+  }
+
+  const envKeys = [
+    "BREVO_API_KEY",
+    "RESEND_API_KEY",
+    "LEADS_FROM_EMAIL",
+    "LEADS_TO_EMAIL",
+  ] as const;
+
+  async function withEnv(
+    values: Partial<Record<(typeof envKeys)[number], string>>,
+    run: () => Promise<void>
+  ) {
+    const saved = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    for (const key of envKeys) delete process.env[key];
+    Object.assign(process.env, values);
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of envKeys) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    }
+  }
+
+  test("an unconfigured delivery logs the lead id and no lead data", async () => {
+    await withEnv({}, async () => {
+      let result: Awaited<ReturnType<typeof deliverLead>> | undefined;
+      const logs = await captureErrors(async () => {
+        result = await deliverLead(lead, leadId);
+      });
+      expect(result?.ok).toBe(false);
+      expect(logs).toContain(leadId);
+      for (const value of pii) expect(logs).not.toContain(value);
+    });
+  });
+
+  test("a provider failure logs the lead id and status, never lead data or the provider body", async () => {
+    await withEnv(
+      {
+        RESEND_API_KEY: "test-key",
+        LEADS_FROM_EMAIL: "leads@example.com",
+        LEADS_TO_EMAIL: "inbox@example.com",
+      },
+      async () => {
+        globalThis.fetch = async () =>
+          new Response(JSON.stringify({ message: `invalid reply_to ${lead.email}` }), {
+            status: 422,
+          });
+        let result: Awaited<ReturnType<typeof deliverLead>> | undefined;
+        const logs = await captureErrors(async () => {
+          result = await deliverLead(lead, leadId);
+        });
+        expect(result?.ok).toBe(false);
+        expect(logs).toContain(leadId);
+        expect(logs).toContain("422");
+        for (const value of pii) expect(logs).not.toContain(value);
+      }
+    );
   });
 });

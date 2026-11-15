@@ -92,8 +92,9 @@ const resendProvider: LeadDeliveryProvider = {
     });
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`Resend responded ${response.status}: ${detail.slice(0, 200)}`);
+      // Status only. The provider's response body can echo the request (recipient
+      // and reply-to addresses), and this message is logged.
+      throw new Error(`Resend responded ${response.status}`);
     }
   },
 };
@@ -140,8 +141,8 @@ const brevoProvider: LeadDeliveryProvider = {
     });
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`Brevo responded ${response.status}: ${detail.slice(0, 200)}`);
+      // Status only; see the Resend provider above.
+      throw new Error(`Brevo responded ${response.status}`);
     }
   },
 };
@@ -159,14 +160,13 @@ export async function deliverLead(
   const active = providers.filter((provider) => provider.isConfigured());
 
   if (active.length === 0) {
-    // No channel configured yet. Do NOT report success. Log the full lead so a
-    // submission during the pre-config window is recoverable from server logs.
-    // (Contains PII — server-side only, emitted exclusively on the failure path
-    // because there is no datastore to fall back to. Configure a provider to
-    // stop this logging.)
+    // No channel configured yet. Do NOT report success. Log the identifier only:
+    // the lead itself is already in the submission archive (written before
+    // delivery), so the PII does not belong in function logs. Same rule as
+    // lib/careers-delivery.ts.
     console.error(
       "[lead] delivery not configured — lead NOT delivered:",
-      JSON.stringify({ leadId, ...lead })
+      JSON.stringify({ leadId })
     );
     return { ok: false, channel: "unconfigured", error: "Lead delivery is not configured." };
   }
@@ -176,13 +176,11 @@ export async function deliverLead(
       await provider.send(lead, leadId);
       return { ok: true, channel: provider.name };
     } catch (error) {
+      // Identifier and reason only. Recover the lead from the archive by leadId.
       console.error(
         `[lead] delivery via ${provider.name} failed:`,
-        error instanceof Error ? error.message : String(error)
+        JSON.stringify({ leadId, reason: error instanceof Error ? error.message : String(error) })
       );
-      // Last-resort recovery: there is no datastore, so log the undelivered
-      // lead (PII, server-side, failure path only) before trying the next channel.
-      console.error("[lead] undelivered lead payload:", JSON.stringify({ leadId, ...lead }));
     }
   }
 
