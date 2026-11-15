@@ -301,6 +301,30 @@ test.describe("SMS opt-in server action (L5)", () => {
   });
 });
 
+test.describe("script-src policy (L6)", () => {
+  test("ships a report-only script-src alongside the enforced directives", async ({ request }) => {
+    const response = await request.get("/");
+    const reportOnly = response.headers()["content-security-policy-report-only"];
+    expect(reportOnly).toContain("script-src 'self'");
+    expect(reportOnly).toContain("https://www.googletagmanager.com");
+    // The enforced policy is unchanged and must not gain a script-src yet.
+    const enforced = response.headers()["content-security-policy"];
+    expect(enforced).toContain("frame-ancestors 'self'");
+    expect(enforced).not.toContain("script-src");
+  });
+
+  test("the pages load without a single CSP violation", async ({ page }) => {
+    const violations: string[] = [];
+    page.on("console", (message) => {
+      if (/content security policy/i.test(message.text())) violations.push(message.text());
+    });
+    for (const path of ["/", "/contact", "/roofing", "/financing", "/careers"]) {
+      await page.goto(path, { waitUntil: "networkidle" });
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
 test.describe("CSV export (L7)", () => {
   test("neutralises cells a spreadsheet would run as a formula", () => {
     for (const dangerous of [

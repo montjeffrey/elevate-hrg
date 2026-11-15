@@ -63,6 +63,27 @@ const nextConfig: NextConfig = {
               "object-src 'none'",
             ].join("; "),
           },
+          // Report-only, NOT enforced. This is the origin allowlist for scripts,
+          // derived from what the app loads: its own bundles, and gtag.js from
+          // googletagmanager.com. 'unsafe-inline' stays until the inline scripts
+          // (Next's hydration payload, the consent/hero/splash bootstraps) get
+          // nonces; until then this reports only scripts from other ORIGINS, which
+          // is the injected-third-party-script case. It is not enforced because the
+          // e2e suite builds without a GA4 id, so it cannot prove gtag.js still
+          // works under enforcement, and a silent analytics break is invisible.
+          // There is no report endpoint: violations show in the browser console.
+          // Enforce by renaming this header once GA4 is verified on a preview
+          // deploy; 'unsafe-eval' is only allowed in dev, where Next's tooling uses it.
+          {
+            key: "Content-Security-Policy-Report-Only",
+            value: [
+              "script-src 'self' 'unsafe-inline'",
+              process.env.NODE_ENV === "production" ? "" : "'unsafe-eval'",
+              "https://www.googletagmanager.com",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          },
         ],
       },
     ];
