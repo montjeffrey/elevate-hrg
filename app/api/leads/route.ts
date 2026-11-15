@@ -74,6 +74,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Honeypot: a real browser never fills it. Answer exactly as an accepted lead
+  // would, so the response gives a bot nothing to adapt to, and do not archive
+  // or deliver anything.
+  if (parsed.data.honeypot) {
+    return NextResponse.json(
+      { data: { status: "accepted", leadId: crypto.randomUUID() } },
+      { status: 200 }
+    );
+  }
+
   let result: Awaited<ReturnType<typeof dispatchLead>>;
 
   try {

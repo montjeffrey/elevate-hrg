@@ -107,6 +107,19 @@ export async function POST(request: Request) {
     });
   }
 
+  // Honeypot: answer exactly as an accepted application would (same body, same
+  // headers) and deliver nothing. Checked after field validation so a filled
+  // honeypot never changes which errors a submitter sees.
+  if (parsed.data.honeypot) {
+    return NextResponse.json(
+      { data: { status: "accepted", applicationId: crypto.randomUUID() } },
+      {
+        status: 200,
+        headers: { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" },
+      }
+    );
+  }
+
   // Magic-byte verification, size re-check, and filename sanitization.
   const resume = await checkResumeUpload(resumeEntries[0] ?? null);
   if (!resume.ok) {

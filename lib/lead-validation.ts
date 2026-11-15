@@ -34,7 +34,10 @@ export const leadSubmissionSchema = z.object({
     .trim()
     .regex(/^\d{5}$/, "ZIP must be exactly 5 digits."),
   message: optionalString(500),
-  honeypot: z.string().max(0, "Leave this field empty.").optional().default(""),
+  // Bot trap. Any value is accepted here on purpose: the route checks it after
+  // validation and answers a filled one exactly like a real submission, so the
+  // response never names the field.
+  honeypot: z.preprocess((value) => (value == null ? "" : String(value)), z.string()),
   email: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().trim().email("Enter a valid email address.").optional()

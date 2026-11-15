@@ -54,10 +54,11 @@ export const careerApplicationSchema = z.object({
   position: z.enum(careerPositionOptions, { error: "Select a position." }),
   experience: z.enum(experienceOptions, { error: "Select your years of experience." }),
   message: optionalString(2000),
-  // Bot trap. A real browser never fills a visually hidden field; anything
-  // non-empty here is rejected the same way a validation failure is, so a
-  // scripted submitter learns nothing from the response.
-  honeypot: z.string().max(0, "Leave this field empty.").optional().default(""),
+  // Bot trap. A real browser never fills a visually hidden field. Any value is
+  // accepted here on purpose: the route checks it after validation and answers
+  // a filled one exactly like a real submission, so a scripted submitter learns
+  // nothing from the response.
+  honeypot: z.preprocess((value) => (value == null ? "" : String(value)), z.string()),
   sourcePath: optionalString(),
   utmSource: optionalString(),
   utmMedium: optionalString(),

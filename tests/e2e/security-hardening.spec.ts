@@ -188,3 +188,67 @@ test.describe("lead delivery logging (L2)", () => {
     );
   });
 });
+
+test.describe("honeypot (L3)", () => {
+  const validLead = {
+    honeypot: "",
+    name: "Test Homeowner",
+    phone: "908-641-9827",
+    service: "Roofing",
+    zip: "07057",
+  };
+  // Unique per test so the throttle never interferes.
+  const isolate = (label: string) => ({
+    "x-nf-client-connection-ip": `198.51.100.${Math.floor(Math.random() * 250)}-${label}-${Date.now()}`,
+  });
+
+  test("/api/leads answers a filled honeypot like an accepted lead and never names the field", async ({
+    request,
+  }) => {
+    const response = await request.post("/api/leads", {
+      data: { ...validLead, honeypot: "bot-filled" },
+      headers: isolate("leads-hp"),
+    });
+    expect(response.status()).toBe(200);
+    const text = await response.text();
+    expect(text).not.toMatch(/honeypot|leave this field/i);
+    const json = JSON.parse(text) as { data?: { status?: string; leadId?: string } };
+    expect(json.data?.status).toBe("accepted");
+    expect(json.data?.leadId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("/api/leads still reports ordinary validation errors, without the honeypot field, when it is filled", async ({
+    request,
+  }) => {
+    const response = await request.post("/api/leads", {
+      data: { ...validLead, name: "", honeypot: "bot-filled" },
+      headers: isolate("leads-hp-invalid"),
+    });
+    expect(response.status()).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("Name is required.");
+    expect(text).not.toMatch(/honeypot|leave this field/i);
+  });
+
+  test("/api/careers answers a filled honeypot like an accepted application", async ({
+    request,
+  }) => {
+    const response = await request.post("/api/careers", {
+      multipart: {
+        name: "Test Applicant",
+        email: "applicant@example.com",
+        phone: "908-641-9827",
+        position: "Roofing Installer",
+        experience: "1–3 years",
+        honeypot: "bot-filled",
+      },
+      headers: isolate("careers-hp"),
+    });
+    const text = await response.text();
+    expect(text).not.toMatch(/honeypot|leave this field/i);
+    expect(response.status()).toBe(200);
+    const json = JSON.parse(text) as { data?: { status?: string; applicationId?: string } };
+    expect(json.data?.status).toBe("accepted");
+    expect(json.data?.applicationId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
