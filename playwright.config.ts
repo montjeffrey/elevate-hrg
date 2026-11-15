@@ -9,12 +9,18 @@ import { defineConfig, devices } from "@playwright/test";
 //   same bytes (measured: 157s of CPU across 5 projects, 60 runs, 0 skips).
 // - routing: asserts HTTP status codes for unknown slugs. That is a server
 //   response, not a rendering behaviour.
+// - security-hardening: API responses, response headers and server-side
+//   helpers; no page rendering is involved.
 //
 // Anything that touches layout, motion, storage, or input belongs in the
 // cross-browser projects below instead — engine differences are the whole
 // point there. Add to this list only when a spec's failure mode cannot differ
 // between engines.
-const ENGINE_INDEPENDENT_SPECS = ["**/stakeholder-corrections.spec.ts", "**/routing.spec.ts"];
+const ENGINE_INDEPENDENT_SPECS = [
+  "**/stakeholder-corrections.spec.ts",
+  "**/routing.spec.ts",
+  "**/security-hardening.spec.ts",
+];
 
 export default defineConfig({
   testDir: "./tests/e2e",

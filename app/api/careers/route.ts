@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { deliverApplication } from "@/lib/careers-delivery";
 import { archiveApplication } from "@/lib/submission-archive";
 import { careerApplicationSchema, toCareerFieldErrors } from "@/lib/careers-validation";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { checkResumeUpload, MAX_REQUEST_BYTES } from "@/lib/resume-file";
 
 // Node runtime: this route needs Buffer for base64 encoding, and the Edge
@@ -13,59 +14,13 @@ export const dynamic = "force-dynamic";
 
 const rateLimitWindowMs = 60 * 60 * 1000; // 1 hour
 const maxApplicationsPerWindow = 5;
-const applicationRequests = new Map<string, number[]>();
-
-// Cheap unbounded-growth guard: the Map is process-local and never evicted on
-// its own, so a stream of unique keys would grow it without limit. Prune on a
-// size trigger rather than a timer (no background work on serverless).
-const maxTrackedKeys = 5_000;
-
-function getRateLimitKey(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip");
-  const userAgent = request.headers.get("user-agent") ?? "unknown-agent";
-  return `${forwardedFor ?? realIp ?? "unknown-ip"}:${userAgent}`;
-}
-
-function pruneExpired(now: number) {
-  if (applicationRequests.size < maxTrackedKeys) return;
-  for (const [key, timestamps] of applicationRequests) {
-    const live = timestamps.filter((timestamp) => now - timestamp < rateLimitWindowMs);
-    if (live.length === 0) applicationRequests.delete(key);
-    else applicationRequests.set(key, live);
-  }
-}
-
-/**
- * Per-instance throttle.
- *
- * Honest limitation: this Map lives in one serverless instance's memory, so a
- * request routed to a cold instance starts from zero and the effective limit is
- * (instances × maxApplicationsPerWindow). It raises the cost of a naive flood
- * and does nothing against a distributed one. The controls that actually bound
- * a flood here are the request-size ceiling below and the platform's own
- * concurrency limits; a durable counter (Upstash/Redis) is the upgrade path if
- * abuse ever materializes. Documented rather than implied so nobody mistakes
- * this for a hard guarantee.
- */
-function isRateLimited(request: Request) {
-  const now = Date.now();
-  const key = getRateLimitKey(request);
-  pruneExpired(now);
-
-  const recentRequests = (applicationRequests.get(key) ?? []).filter(
-    (timestamp) => now - timestamp < rateLimitWindowMs
-  );
-
-  if (recentRequests.length >= maxApplicationsPerWindow) {
-    applicationRequests.set(key, recentRequests);
-    return true;
-  }
-
-  recentRequests.push(now);
-  applicationRequests.set(key, recentRequests);
-  return false;
-}
+// Per-instance throttle with a bounded key map; see lib/rate-limit.ts for the
+// honest limitations. The controls that actually bound a flood here are the
+// request-size ceiling below and the platform's own concurrency limits.
+const applicationLimiter = createRateLimiter({
+  windowMs: rateLimitWindowMs,
+  maxRequests: maxApplicationsPerWindow,
+});
 
 function errorResponse(
   code: string,
@@ -98,7 +53,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isRateLimited(request)) {
+  if (applicationLimiter.isLimited(request)) {
     return errorResponse(
       "rate_limit_exceeded",
       "Too many applications from this device. Please try again later.",

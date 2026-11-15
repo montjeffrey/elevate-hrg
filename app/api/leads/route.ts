@@ -1,35 +1,15 @@
 import { NextResponse } from "next/server";
 import { dispatchLead } from "@/lib/lead-actions";
 import { leadSubmissionSchema, toFieldErrors } from "@/lib/lead-validation";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 const maxRequestBytes = 16_384;
 const rateLimitWindowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 60;
-const leadRequests = new Map<string, number[]>();
-
-function getRateLimitKey(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip");
-  const userAgent = request.headers.get("user-agent") ?? "unknown-agent";
-  return `${forwardedFor ?? realIp ?? "unknown-ip"}:${userAgent}`;
-}
-
-function isRateLimited(request: Request) {
-  const now = Date.now();
-  const key = getRateLimitKey(request);
-  const recentRequests = (leadRequests.get(key) ?? []).filter(
-    (timestamp) => now - timestamp < rateLimitWindowMs
-  );
-
-  if (recentRequests.length >= maxRequestsPerWindow) {
-    leadRequests.set(key, recentRequests);
-    return true;
-  }
-
-  recentRequests.push(now);
-  leadRequests.set(key, recentRequests);
-  return false;
-}
+const leadLimiter = createRateLimiter({
+  windowMs: rateLimitWindowMs,
+  maxRequests: maxRequestsPerWindow,
+});
 
 export async function POST(request: Request) {
   const contentLength = Number(request.headers.get("content-length") ?? 0);
@@ -46,7 +26,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isRateLimited(request)) {
+  if (leadLimiter.isLimited(request)) {
     return NextResponse.json(
       {
         error: {
