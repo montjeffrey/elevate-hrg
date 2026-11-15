@@ -50,16 +50,13 @@
     "inquirer": "^8.2.7",
     "express": "^4.22.2",
     "qs": "^6.15.3",
-    "body-parser": "^1.20.6",
+    "body-parser": "^1.20.9",
+    "basic-ftp": "^6.2.4",
     "ws": "^8.21.1",
     "chrome-launcher": "^1.2.1",
     "playwright-core": "1.59.1",
-    "eslint": {
-      "minimatch": "^10.2.5"
-    },
-    "eslint-config-next": {
-      "minimatch": "^10.2.5"
-    }
+    "minimatch": "^11.0.1",
+    "glob": "^14.0.6"
   },
   "dependencies": {
     "@axe-core/playwright": "^4.11.3",
