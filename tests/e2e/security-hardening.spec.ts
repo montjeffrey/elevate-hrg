@@ -1,3 +1,4 @@
+import http from "node:http";
 import { expect, test } from "@playwright/test";
 import { deliverLead } from "@/lib/lead-delivery";
 import type { LeadSubmission } from "@/lib/lead-validation";
@@ -321,5 +322,117 @@ test.describe("CSV export (L7)", () => {
     expect(csvCell(undefined)).toBe('""');
     expect(csvCell(null)).toBe('""');
     expect(csvCell(7)).toBe('"7"');
+  });
+});
+
+test.describe("request body limit (L9)", () => {
+  /**
+   * POST with `Transfer-Encoding: chunked` and no Content-Length, which is how a
+   * client gets past a header-only size check. Playwright's request fixture
+   * always sets Content-Length, so this uses node:http directly.
+   */
+  function postChunked(
+    baseURL: string,
+    path: string,
+    headers: Record<string, string>,
+    chunks: Buffer[]
+  ) {
+    return new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const url = new URL(path, baseURL);
+      const clientRequest = http.request(
+        url,
+        { method: "POST", headers: { ...headers, "transfer-encoding": "chunked" } },
+        (response) => {
+          let body = "";
+          response.on("data", (data: Buffer) => (body += data.toString()));
+          response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+        }
+      );
+      // The server may answer 413 and close before the whole body is written.
+      clientRequest.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "ECONNRESET" || error.code === "EPIPE") return;
+        reject(error);
+      });
+      for (const chunk of chunks) clientRequest.write(chunk);
+      clientRequest.end();
+    });
+  }
+
+  const isolate = (label: string) => ({
+    "x-nf-client-connection-ip": `192.0.2.${Math.floor(Math.random() * 250)}-${label}-${Date.now()}`,
+  });
+
+  test("/api/leads refuses an oversized chunked body that has no Content-Length", async ({}, testInfo) => {
+    const baseURL = testInfo.project.use.baseURL as string;
+    const chunks = [
+      Buffer.from('{"name":"'),
+      ...Array.from({ length: 8 }, () => Buffer.alloc(4_096, "a")),
+      Buffer.from('"}'),
+    ];
+    const response = await postChunked(
+      baseURL,
+      "/api/leads",
+      { "content-type": "application/json", ...isolate("leads-chunked") },
+      chunks
+    );
+    expect(response.status).toBe(413);
+    expect(response.body).toContain("request_too_large");
+  });
+
+  test("/api/leads still accepts a small chunked body", async ({}, testInfo) => {
+    const baseURL = testInfo.project.use.baseURL as string;
+    const response = await postChunked(
+      baseURL,
+      "/api/leads",
+      { "content-type": "application/json", ...isolate("leads-small") },
+      [Buffer.from("{}")]
+    );
+    // Parsed and validated (empty object fails validation), not refused as too large.
+    expect(response.status).toBe(400);
+    expect(response.body).toContain("validation_error");
+  });
+
+  test("/api/careers refuses an oversized chunked body that has no Content-Length", async ({}, testInfo) => {
+    const baseURL = testInfo.project.use.baseURL as string;
+    const boundary = "----limit-test";
+    const chunks = [
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="name"\r\n\r\n`),
+      ...Array.from({ length: 6 }, () => Buffer.alloc(1024 * 1024, "a")),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ];
+    const response = await postChunked(
+      baseURL,
+      "/api/careers",
+      {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        ...isolate("careers-chunked"),
+      },
+      chunks
+    );
+    expect(response.status).toBe(413);
+    expect(response.body).toContain("request_too_large");
+  });
+
+  test("/api/careers still parses a normal multipart application within the limit", async ({
+    request,
+  }) => {
+    const response = await request.post("/api/careers", {
+      multipart: {
+        name: "Test Applicant",
+        email: "applicant@example.com",
+        phone: "908-641-9827",
+        position: "Roofing Installer",
+        experience: "1–3 years",
+        resume: {
+          name: "resume.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"),
+        },
+      },
+      headers: isolate("careers-valid"),
+    });
+    // Reached validation and delivery: 200 when a provider is configured, 502
+    // when none is (the default for local runs). Never a body-parsing failure.
+    expect([200, 502]).toContain(response.status());
   });
 });

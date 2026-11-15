@@ -3,6 +3,7 @@ import { deliverApplication } from "@/lib/careers-delivery";
 import { archiveApplication } from "@/lib/submission-archive";
 import { careerApplicationSchema, toCareerFieldErrors } from "@/lib/careers-validation";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { readBodyWithLimit } from "@/lib/request-body";
 import { checkResumeUpload, MAX_REQUEST_BYTES } from "@/lib/resume-file";
 
 // Node runtime: this route needs Buffer for base64 encoding, and the Edge
@@ -36,9 +37,9 @@ function errorResponse(
 
 export async function POST(request: Request) {
   // Size gate FIRST, before the body is touched. Refusing on the declared
-  // Content-Length is what keeps an oversized upload from being buffered at all;
-  // lib/resume-file.ts re-checks the bytes that actually arrive, because a
-  // client is free to lie in this header.
+  // Content-Length is the cheap early exit; the body is then read with a hard
+  // byte cap below, because a client is free to omit or lie in this header.
+  // lib/resume-file.ts separately checks the size of the resume itself.
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
     return errorResponse("request_too_large", "That upload is too large.", 413);
@@ -62,9 +63,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Count the bytes as they arrive instead of letting formData() buffer an
+  // unbounded body, then parse the bounded copy.
+  const rawBody = await readBodyWithLimit(request, MAX_REQUEST_BYTES);
+  if (rawBody === null) {
+    return errorResponse("request_too_large", "That upload is too large.", 413);
+  }
+
   let form: FormData;
   try {
-    form = await request.formData();
+    form = await new Request(request.url, {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: rawBody,
+    }).formData();
   } catch {
     return errorResponse("invalid_form_data", "Request body could not be read.", 400);
   }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { dispatchLead } from "@/lib/lead-actions";
 import { leadSubmissionSchema, toFieldErrors } from "@/lib/lead-validation";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { readBodyWithLimit } from "@/lib/request-body";
 
 const maxRequestBytes = 16_384;
 const rateLimitWindowMs = 10 * 60 * 1000;
@@ -11,19 +12,25 @@ const leadLimiter = createRateLimiter({
   maxRequests: maxRequestsPerWindow,
 });
 
+function requestTooLarge() {
+  return NextResponse.json(
+    {
+      error: {
+        code: "request_too_large",
+        message: "Request body is too large.",
+      },
+    },
+    { status: 413 }
+  );
+}
+
 export async function POST(request: Request) {
+  // Cheap early refusal on the declared size. It is only a hint (a chunked or
+  // understated request gets past it), so the body is also counted as it is read.
   const contentLength = Number(request.headers.get("content-length") ?? 0);
 
   if (contentLength > maxRequestBytes) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "request_too_large",
-          message: "Request body is too large.",
-        },
-      },
-      { status: 413 }
-    );
+    return requestTooLarge();
   }
 
   if (leadLimiter.isLimited(request)) {
@@ -43,10 +50,16 @@ export async function POST(request: Request) {
     );
   }
 
+  const rawBody = await readBodyWithLimit(request, maxRequestBytes);
+
+  if (rawBody === null) {
+    return requestTooLarge();
+  }
+
   let body: unknown;
 
   try {
-    body = await request.json();
+    body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
     return NextResponse.json(
       {
