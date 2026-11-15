@@ -23,6 +23,7 @@
  */
 import { readFileSync } from "node:fs";
 import { getStore } from "@netlify/blobs";
+import { csvCell } from "./csv-cell.mjs";
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
@@ -78,9 +79,8 @@ if (flag("json")) {
 } else if (flag("csv")) {
   // Union of keys across rows — the schema can grow over time.
   const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   console.log(cols.join(","));
-  for (const r of rows) console.log(cols.map((c) => cell(r[c])).join(","));
+  for (const r of rows) console.log(cols.map((c) => csvCell(r[c])).join(","));
 } else {
   console.log(`\n${storeName}: ${rows.length} entr${rows.length === 1 ? "y" : "ies"}\n`);
   for (const r of rows) {

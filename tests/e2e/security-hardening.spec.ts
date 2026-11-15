@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { deliverLead } from "@/lib/lead-delivery";
 import type { LeadSubmission } from "@/lib/lead-validation";
 import { submitSmsOptIn, type SmsOptInInput } from "@/lib/sms-actions";
+import { csvCell } from "../../scripts/csv-cell.mjs";
 import { createRateLimiter, getClientKey } from "@/lib/rate-limit";
 
 /**
@@ -296,5 +297,29 @@ test.describe("SMS opt-in server action (L5)", () => {
       ok: false,
       error: "You must agree to receive text messages to join.",
     });
+  });
+});
+
+test.describe("CSV export (L7)", () => {
+  test("neutralises cells a spreadsheet would run as a formula", () => {
+    for (const dangerous of [
+      '=HYPERLINK("https://evil.example","Call me")',
+      "+1 (908) 641-9827",
+      "-2+3",
+      "@SUM(A1:A9)",
+      "\t=1+1",
+      "\r=1+1",
+    ]) {
+      expect(csvCell(dangerous)).toBe(`"'${dangerous.replace(/"/g, '""')}"`);
+    }
+  });
+
+  test("leaves ordinary values alone and still escapes quotes", () => {
+    expect(csvCell("Pat Homeowner")).toBe('"Pat Homeowner"');
+    expect(csvCell('He said "hi"')).toBe('"He said ""hi"""');
+    expect(csvCell("a=b")).toBe('"a=b"');
+    expect(csvCell(undefined)).toBe('""');
+    expect(csvCell(null)).toBe('""');
+    expect(csvCell(7)).toBe('"7"');
   });
 });
