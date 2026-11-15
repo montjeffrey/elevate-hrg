@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { deliverLead } from "@/lib/lead-delivery";
 import type { LeadSubmission } from "@/lib/lead-validation";
+import { submitSmsOptIn, type SmsOptInInput } from "@/lib/sms-actions";
 import { createRateLimiter, getClientKey } from "@/lib/rate-limit";
 
 /**
@@ -250,5 +251,50 @@ test.describe("honeypot (L3)", () => {
     const json = JSON.parse(text) as { data?: { status?: string; applicationId?: string } };
     expect(json.data?.status).toBe("accepted");
     expect(json.data?.applicationId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
+test.describe("SMS opt-in server action (L5)", () => {
+  const valid: SmsOptInInput = {
+    phone: "908-641-9827",
+    consent: true,
+    consentText: "I agree to receive text messages.",
+  };
+
+  test("does not report success while nothing is stored or sent", async () => {
+    const result = await submitSmsOptIn(valid);
+    expect(result.ok).toBe(false);
+  });
+
+  test("rejects an oversized consent text", async () => {
+    const result = await submitSmsOptIn({ ...valid, consentText: "x".repeat(1_001) });
+    expect(result).toEqual({ ok: false, error: "Consent text was missing. Please try again." });
+  });
+
+  test("rejects an oversized phone value and wrong types without throwing", async () => {
+    const bad = [
+      { ...valid, phone: "9".repeat(5_000) },
+      { ...valid, phone: 9086419827 },
+      { ...valid, consentText: { toString: "x" } },
+      { ...valid, consent: "true" },
+      { phone: null, consent: null, consentText: null },
+      null,
+      "not an object",
+    ];
+    for (const input of bad) {
+      const result = await submitSmsOptIn(input as unknown as SmsOptInInput);
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  test("keeps the field-specific messages the modal shows", async () => {
+    expect(await submitSmsOptIn({ ...valid, phone: "123" })).toEqual({
+      ok: false,
+      error: "Please enter a valid mobile number.",
+    });
+    expect(await submitSmsOptIn({ ...valid, consent: false })).toEqual({
+      ok: false,
+      error: "You must agree to receive text messages to join.",
+    });
   });
 });

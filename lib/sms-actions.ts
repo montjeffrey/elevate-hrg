@@ -1,6 +1,7 @@
 "use server";
 
 import { createHash } from "node:crypto";
+import { z } from "zod";
 
 export type SmsOptInInput = {
   phone: string;
@@ -9,6 +10,17 @@ export type SmsOptInInput = {
 };
 
 export type SmsOptInResult = { ok: true } | { ok: false; error: string };
+
+// A Server Action is a public endpoint: its argument arrives from the network,
+// not from the modal's types. The consent text the modal shows is well under
+// this; the cap only stops an arbitrarily large string being accepted.
+const MAX_CONSENT_TEXT_LENGTH = 1_000;
+
+const smsOptInSchema = z.object({
+  phone: z.string().max(40),
+  consent: z.literal(true),
+  consentText: z.string().trim().min(1).max(MAX_CONSENT_TEXT_LENGTH),
+});
 
 /**
  * Records a TCPA-safe SMS marketing opt-in ("Join the Club") with the consent
@@ -22,35 +34,36 @@ export type SmsOptInResult = { ok: true } | { ok: false; error: string };
  *   3. Wire STOP / HELP keyword handling in the provider console.
  *   4. Persist the consent record (phone, consentText, timestamp, ip) to the
  *      compliance store so it can be produced on request.
- * Until then this validates input and logs the consent record server-side.
+ * Until then this validates input and reports that sign-ups are not available.
+ * It must NOT return `ok: true`: nothing is stored or sent, and a visitor who is
+ * told they joined would believe a consent record exists.
  * Do NOT fabricate provider credentials.
  */
 export async function submitSmsOptIn(input: SmsOptInInput): Promise<SmsOptInResult> {
-  const phone = (input.phone ?? "").trim();
-  const digits = phone.replace(/\D/g, "");
+  const parsed = smsOptInSchema.safeParse(input);
+
+  if (!parsed.success) {
+    const failed = new Set(parsed.error.issues.map((issue) => issue.path[0]));
+    if (failed.has("phone")) return { ok: false, error: "Please enter a valid mobile number." };
+    if (failed.has("consent")) {
+      return { ok: false, error: "You must agree to receive text messages to join." };
+    }
+    return { ok: false, error: "Consent text was missing. Please try again." };
+  }
+
+  const digits = parsed.data.phone.replace(/\D/g, "");
 
   if (digits.length < 10 || digits.length > 15) {
     return { ok: false, error: "Please enter a valid mobile number." };
   }
 
-  if (input.consent !== true) {
-    return { ok: false, error: "You must agree to receive text messages to join." };
-  }
-
-  if (!input.consentText || input.consentText.trim().length === 0) {
-    return { ok: false, error: "Consent text was missing. Please try again." };
-  }
-
-  const consentRecord = {
+  // TODO(sms-provider): send the double opt-in confirmation text and persist the
+  // consent record once the SMS provider (e.g. Twilio) and compliance store are
+  // wired, then return { ok: true }. Until then nothing is recorded, so log a
+  // non-identifying marker only.
+  console.info("sms.optin.unavailable", {
     phoneHash: createHash("sha256").update(digits).digest("hex").slice(0, 12),
-    consentText: input.consentText,
-    consentedAt: new Date().toISOString(),
-    source: "join-the-club-modal",
-  };
+  });
 
-  // TODO(sms-provider): send double opt-in confirmation text + persist consent
-  // record once the SMS provider (e.g. Twilio) and compliance store are wired.
-  console.info("sms.optin.recorded", consentRecord);
-
-  return { ok: true };
+  return { ok: false, error: "Text sign-ups aren't available yet. Please check back soon." };
 }
