@@ -1,52 +1,39 @@
 import { NextResponse } from "next/server";
 import { dispatchLead } from "@/lib/lead-actions";
 import { leadSubmissionSchema, toFieldErrors } from "@/lib/lead-validation";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { readBodyWithLimit } from "@/lib/request-body";
 
 const maxRequestBytes = 16_384;
 const rateLimitWindowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 60;
-const leadRequests = new Map<string, number[]>();
+const leadLimiter = createRateLimiter({
+  windowMs: rateLimitWindowMs,
+  maxRequests: maxRequestsPerWindow,
+});
 
-function getRateLimitKey(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip");
-  const userAgent = request.headers.get("user-agent") ?? "unknown-agent";
-  return `${forwardedFor ?? realIp ?? "unknown-ip"}:${userAgent}`;
-}
-
-function isRateLimited(request: Request) {
-  const now = Date.now();
-  const key = getRateLimitKey(request);
-  const recentRequests = (leadRequests.get(key) ?? []).filter(
-    (timestamp) => now - timestamp < rateLimitWindowMs
+function requestTooLarge() {
+  return NextResponse.json(
+    {
+      error: {
+        code: "request_too_large",
+        message: "Request body is too large.",
+      },
+    },
+    { status: 413 }
   );
-
-  if (recentRequests.length >= maxRequestsPerWindow) {
-    leadRequests.set(key, recentRequests);
-    return true;
-  }
-
-  recentRequests.push(now);
-  leadRequests.set(key, recentRequests);
-  return false;
 }
 
 export async function POST(request: Request) {
+  // Cheap early refusal on the declared size. It is only a hint (a chunked or
+  // understated request gets past it), so the body is also counted as it is read.
   const contentLength = Number(request.headers.get("content-length") ?? 0);
 
   if (contentLength > maxRequestBytes) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "request_too_large",
-          message: "Request body is too large.",
-        },
-      },
-      { status: 413 }
-    );
+    return requestTooLarge();
   }
 
-  if (isRateLimited(request)) {
+  if (leadLimiter.isLimited(request)) {
     return NextResponse.json(
       {
         error: {
@@ -63,10 +50,16 @@ export async function POST(request: Request) {
     );
   }
 
+  const rawBody = await readBodyWithLimit(request, maxRequestBytes);
+
+  if (rawBody === null) {
+    return requestTooLarge();
+  }
+
   let body: unknown;
 
   try {
-    body = await request.json();
+    body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
     return NextResponse.json(
       {
@@ -91,6 +84,16 @@ export async function POST(request: Request) {
         },
       },
       { status: 400 }
+    );
+  }
+
+  // Honeypot: a real browser never fills it. Answer exactly as an accepted lead
+  // would, so the response gives a bot nothing to adapt to, and do not archive
+  // or deliver anything.
+  if (parsed.data.honeypot) {
+    return NextResponse.json(
+      { data: { status: "accepted", leadId: crypto.randomUUID() } },
+      { status: 200 }
     );
   }
 

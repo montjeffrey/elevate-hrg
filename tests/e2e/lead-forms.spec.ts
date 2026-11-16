@@ -110,7 +110,7 @@ test("short lead form retains the standard contact and project fields", async ({
   await expect(leadForm.locator("#company")).toHaveCount(1);
 });
 
-test("lead API passes valid input to delivery and rejects honeypot submissions", async ({
+test("lead API passes valid input to delivery and silently drops honeypot submissions", async ({
   request,
 }) => {
   const validLead = {
@@ -147,14 +147,16 @@ test("lead API passes valid input to delivery and rejects honeypot submissions",
     expect(acceptedJson.error?.code).toBe("lead_delivery_failed");
   }
 
-  // Honeypot submissions are rejected at validation with 400.
-  const rejected = await request.post("/api/leads", {
+  // Honeypot submissions get the same 200 a real lead gets, so the response
+  // does not tell a bot which field tripped it, and nothing is delivered. The
+  // detailed assertions live in security-hardening.spec.ts.
+  const dropped = await request.post("/api/leads", {
     data: {
       ...validLead,
       honeypot: "bot-filled",
     },
   });
-  expect(rejected.status()).toBe(400);
+  expect(dropped.status()).toBe(200);
 });
 
 test("quote form sends retained homeowner and attribution fields only", async ({ page }) => {

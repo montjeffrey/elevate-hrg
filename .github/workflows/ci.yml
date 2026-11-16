@@ -12,6 +12,9 @@ on:
 # Pushing twice in quick succession used to pay for both runs. Only the newest
 # commit on a ref is worth verifying, and there is exactly one self-hosted
 # runner, so a superseded run would otherwise block the one that matters.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +32,11 @@ jobs:
     #
     # Falling back to `ubuntu-latest` is a one-line change if the runner is ever
     # unavailable — but drop PW_WORKERS back to 2, since hosted runners are 2-core.
-    runs-on: [self-hosted, linux, x64]
+    #
+    # This public repository runs on GitHub-hosted runners instead: they are free
+    # for public repos, and a self-hosted runner must never take jobs from a
+    # public repo, where a pull request from a fork could run code on it.
+    runs-on: ubuntu-latest
     # Everything runs inside Playwright's own image, pinned to the exact version
     # in package.json. This is not gold-plating — it is the only way this works.
     # The runner host is WSL2 Ubuntu 26.04, and Playwright 1.59.1 publishes no
@@ -72,8 +79,8 @@ jobs:
     # default cap is six hours; a healthy run here is well under 30 minutes.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -106,7 +113,8 @@ jobs:
           # The runner box has 20 cores but WSL2 caps it near 7.7 GB of RAM, and
           # six concurrent browser engines are memory-bound long before they are
           # CPU-bound. Six workers is ~3x the old hosted setting with headroom.
-          PW_WORKERS: 6
+          # Back to 2 on hosted runners, per the note on runs-on above.
+          PW_WORKERS: 2
           # All six Playwright projects. Escape hatch: if WebKit turns out to be
           # unbuildable on the runner's Ubuntu 26.04 (Playwright 1.59.1 publishes
           # no package list for it), set this to `quick` to drop Firefox and
@@ -114,59 +122,43 @@ jobs:
           # `npx playwright install --with-deps webkit` succeeds there.
           VERIFY_LEVEL: full
 
-      # Lighthouse launches its own Chrome, and chrome-launcher only searches
-      # standard system locations. `ubuntu-latest` ships Chrome preinstalled,
-      # which is the only reason the lhci step below ever worked; a bare WSL
-      # Ubuntu has no Chrome at all and lhci dies with "No Chrome installations
-      # found". Point it at the Chromium `npx playwright install` already put in
-      # ~/.cache/ms-playwright, so there is nothing extra to provision.
-      #
-      # Caveat: that is Playwright's Chromium build, not Google Chrome stable,
-      # so absolute Lighthouse numbers can shift a little. The budgets in
-      # lighthouserc.cjs were calibrated on hosted runners; if they prove
-      # miscalibrated for this hardware, recalibrate them there rather than
-      # loosening this step into meaninglessness.
-      - name: point Lighthouse at Playwright's Chromium
-        run: |
-          echo "CHROME_PATH=$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      # No upload-artifact step on purpose: a Playwright report with traces
+      # runs to hundreds of MB. Re-run locally with `npm run verify` instead.
 
-      # Separate from the gate because it needs its own build with the real
-      # measurement ID: `npm run lhci` runs `next build` itself, so the id has to
-      # be present here or the audited build ships an empty value and no tag —
-      # and Lighthouse would then measure a page without gtag.js, making the TBT
-      # ceilings in lighthouserc.cjs a fiction. Every CI hit is tagged internal
-      # so it can be excluded in GA4. REQUIRES a matching "Internal Traffic" data
-      # filter to be Active in GA4 Admin → Data filters. See .env.example.
-      # A FRESH build, deliberately. The gate above already wrote .next with NO
-      # GA4 id; this build needs one WITH it, and NEXT_PUBLIC_* is string-inlined
-      # at build time. Rebuilding over that .next is exactly the hazard
-      # .env.example documents for Netlify — "a plain Deploy site can reuse the
-      # cached .next and ship the old empty value" — which would leave Lighthouse
-      # auditing a page with no tag while the TBT ceilings pretend otherwise.
-      #
-      # On 2026-08-27 it did worse than that: all four verify stages passed (345
-      # tests) and then the rebuild died outright.
-      #
-      #   TurbopackInternalError: Failed to write app endpoint /page
-      #   evaluate_webpack_loader failed / failed to receive message
-      #   reading packet length / unexpected end of file
-      #
-      # "failed to receive message" is Turbopack's PostCSS worker dying, not a
-      # compile error, and it only ever happens on the SECOND build — the first
-      # compiles the same CSS in 2.8s. Bumping NODE_OPTIONS did nothing, which
-      # figures: Turbopack's workers are Rust, not V8. An incremental rebuild
-      # over a cache written with different inlined constants is the likelier
-      # culprit, and clearing it costs seconds.
+  lighthouse:
+    # Lighthouse runs as its own job, directly on the runner host, NOT inside
+    # the Playwright container the `verify` job uses. Two reasons:
+    #
+    # 1. Measurement fidelity. Every budget in lighthouserc.cjs was calibrated
+    #    on `ubuntu-latest` with its preinstalled Google Chrome (e.g. homepage
+    #    best-of-3 TBT 1163–1593ms, runs 32047158297 / 32056919441). Running
+    #    Lighthouse inside the container with Playwright's headless Chromium
+    #    instead measured the same homepage at 3958–5560ms of TBT, almost all
+    #    of it "Other" main-thread work (video/animation frames rendered without
+    #    a GPU), while every service page stayed inside budget. That is a
+    #    different instrument, not a slower site — so the audit goes back to the
+    #    instrument the budgets were set with, rather than loosening them.
+    # 2. No root, no --no-sandbox. On the host Chrome runs as the normal runner
+    #    user with its sandbox on, so lighthouserc.cjs needs no chromeFlags.
+    #
+    # It builds its own .next with the real GA4 id (NEXT_PUBLIC_* is inlined at
+    # build time), so the audited page carries gtag.js exactly like production.
+    # Every CI hit is tagged internal so it can be excluded in GA4 — REQUIRES a
+    # matching "Internal Traffic" data filter to be Active in GA4 Admin → Data
+    # filters. See .env.example. Being a separate job on a fresh checkout also
+    # removes the second-build-over-a-stale-.next Turbopack crash seen on
+    # 2026-08-27.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Lighthouse (fresh build with the real measurement id)
-        run: |
-          rm -rf .next
-          npm run lhci
+        run: npm run lhci
         env:
           NEXT_PUBLIC_GA4_ID: G-PTJ4Z4E9KJ
           NEXT_PUBLIC_ANALYTICS_TRAFFIC_TYPE: internal
-
-      # No upload-artifact step on purpose: artifact storage is billed against
-      # the same quota that is already exhausted, and a Playwright report with
-      # traces runs to hundreds of MB. On a self-hosted runner the report is
-      # already on disk — open it from WSL with:
-      #   npx playwright show-report ~/actions-runner/_work/elevateHRG/elevateHRG/playwright-report

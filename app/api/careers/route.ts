@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { deliverApplication } from "@/lib/careers-delivery";
 import { archiveApplication } from "@/lib/submission-archive";
 import { careerApplicationSchema, toCareerFieldErrors } from "@/lib/careers-validation";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { readBodyWithLimit } from "@/lib/request-body";
 import { checkResumeUpload, MAX_REQUEST_BYTES } from "@/lib/resume-file";
 
 // Node runtime: this route needs Buffer for base64 encoding, and the Edge
@@ -13,59 +15,13 @@ export const dynamic = "force-dynamic";
 
 const rateLimitWindowMs = 60 * 60 * 1000; // 1 hour
 const maxApplicationsPerWindow = 5;
-const applicationRequests = new Map<string, number[]>();
-
-// Cheap unbounded-growth guard: the Map is process-local and never evicted on
-// its own, so a stream of unique keys would grow it without limit. Prune on a
-// size trigger rather than a timer (no background work on serverless).
-const maxTrackedKeys = 5_000;
-
-function getRateLimitKey(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip");
-  const userAgent = request.headers.get("user-agent") ?? "unknown-agent";
-  return `${forwardedFor ?? realIp ?? "unknown-ip"}:${userAgent}`;
-}
-
-function pruneExpired(now: number) {
-  if (applicationRequests.size < maxTrackedKeys) return;
-  for (const [key, timestamps] of applicationRequests) {
-    const live = timestamps.filter((timestamp) => now - timestamp < rateLimitWindowMs);
-    if (live.length === 0) applicationRequests.delete(key);
-    else applicationRequests.set(key, live);
-  }
-}
-
-/**
- * Per-instance throttle.
- *
- * Honest limitation: this Map lives in one serverless instance's memory, so a
- * request routed to a cold instance starts from zero and the effective limit is
- * (instances × maxApplicationsPerWindow). It raises the cost of a naive flood
- * and does nothing against a distributed one. The controls that actually bound
- * a flood here are the request-size ceiling below and the platform's own
- * concurrency limits; a durable counter (Upstash/Redis) is the upgrade path if
- * abuse ever materializes. Documented rather than implied so nobody mistakes
- * this for a hard guarantee.
- */
-function isRateLimited(request: Request) {
-  const now = Date.now();
-  const key = getRateLimitKey(request);
-  pruneExpired(now);
-
-  const recentRequests = (applicationRequests.get(key) ?? []).filter(
-    (timestamp) => now - timestamp < rateLimitWindowMs
-  );
-
-  if (recentRequests.length >= maxApplicationsPerWindow) {
-    applicationRequests.set(key, recentRequests);
-    return true;
-  }
-
-  recentRequests.push(now);
-  applicationRequests.set(key, recentRequests);
-  return false;
-}
+// Per-instance throttle with a bounded key map; see lib/rate-limit.ts for the
+// honest limitations. The controls that actually bound a flood here are the
+// request-size ceiling below and the platform's own concurrency limits.
+const applicationLimiter = createRateLimiter({
+  windowMs: rateLimitWindowMs,
+  maxRequests: maxApplicationsPerWindow,
+});
 
 function errorResponse(
   code: string,
@@ -81,9 +37,9 @@ function errorResponse(
 
 export async function POST(request: Request) {
   // Size gate FIRST, before the body is touched. Refusing on the declared
-  // Content-Length is what keeps an oversized upload from being buffered at all;
-  // lib/resume-file.ts re-checks the bytes that actually arrive, because a
-  // client is free to lie in this header.
+  // Content-Length is the cheap early exit; the body is then read with a hard
+  // byte cap below, because a client is free to omit or lie in this header.
+  // lib/resume-file.ts separately checks the size of the resume itself.
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
     return errorResponse("request_too_large", "That upload is too large.", 413);
@@ -98,7 +54,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isRateLimited(request)) {
+  if (applicationLimiter.isLimited(request)) {
     return errorResponse(
       "rate_limit_exceeded",
       "Too many applications from this device. Please try again later.",
@@ -107,9 +63,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Count the bytes as they arrive instead of letting formData() buffer an
+  // unbounded body, then parse the bounded copy.
+  const rawBody = await readBodyWithLimit(request, MAX_REQUEST_BYTES);
+  if (rawBody === null) {
+    return errorResponse("request_too_large", "That upload is too large.", 413);
+  }
+
   let form: FormData;
   try {
-    form = await request.formData();
+    form = await new Request(request.url, {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: rawBody,
+    }).formData();
   } catch {
     return errorResponse("invalid_form_data", "Request body could not be read.", 400);
   }
@@ -150,6 +117,19 @@ export async function POST(request: Request) {
     return errorResponse("validation_error", "Request validation failed.", 400, {
       details: toCareerFieldErrors(parsed.error),
     });
+  }
+
+  // Honeypot: answer exactly as an accepted application would (same body, same
+  // headers) and deliver nothing. Checked after field validation so a filled
+  // honeypot never changes which errors a submitter sees.
+  if (parsed.data.honeypot) {
+    return NextResponse.json(
+      { data: { status: "accepted", applicationId: crypto.randomUUID() } },
+      {
+        status: 200,
+        headers: { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" },
+      }
+    );
   }
 
   // Magic-byte verification, size re-check, and filename sanitization.
